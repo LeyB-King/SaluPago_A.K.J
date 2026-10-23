@@ -201,6 +201,13 @@ DEFAULT_CONFIG = {
     "correo_alerta": "andresberri15@gmail.com",
     "whatsapp_alerta": "3022386236",
     "mostrar_pantalla_falsa": True
+    },
+        "google_drive": {
+        "activo": False,
+        "subir_backup_automatico": True,
+        "subir_backup_manual": True,
+        "carpeta": "SaluPago_Backups",
+        "dias_conservar_drive": 30
     }
 }
 def animacion_corazon_ecg(ventana, duracion=5.0, callback=None):
@@ -497,7 +504,22 @@ class ConfigManager:
 
     def get_panico_pantalla_falsa(self):
         return self.get('boton_panico.mostrar_pantalla_falsa', True)
-    
+
+    def get_drive_activo(self):
+        return self.get('google_drive.activo', False)
+
+    def set_drive_activo(self, valor):
+        self.set('google_drive.activo', bool(valor))
+
+    def get_drive_subir_auto(self):
+        return self.get('google_drive.subir_backup_automatico', True)
+
+    def get_drive_subir_manual(self):
+        return self.get('google_drive.subir_backup_manual', True)
+
+    def get_drive_carpeta(self):
+        return self.get('google_drive.carpeta', 'SaluPago_Backups')
+
 class Database:
     def __init__(self, db_path=None, config=None):
         # Si no se pasa config, creamos una instancia local
@@ -1608,7 +1630,7 @@ class MenuPrincipal:
 
         ttk.Label(
             footer_frame,
-            text="D. A.K.J Versión 4.0.8",
+            text="D. R.A.V Versión 4.0.8",
             font=('Segoe UI', 9, 'italic'),
             foreground='#999'
         ).pack(side=tk.RIGHT)
@@ -1787,7 +1809,7 @@ class LoginWindow:
         left_frame.rowconfigure(0, weight=1)
 
         try:
-            logo_path = os.path.join(IMG_PATH, "LogoSP1.png")
+            logo_path = os.path.join(IMG_PATH, "LogoSP2.png")
             if os.path.exists(logo_path):
                 logo = Image.open(logo_path)
                 logo = logo.resize((470, 400), Image.LANCZOS)
@@ -1860,7 +1882,7 @@ class LoginWindow:
         footer_frame.pack(fill=tk.X, pady=(20, 0))
         inner_footer = ttk.Frame(footer_frame)
         inner_footer.pack()
-        ttk.Label(inner_footer, text="Desarrollado por: A.K.J", style='Footer.TLabel').pack()
+        ttk.Label(inner_footer, text="Desarrollado por: R.A.V", style='Footer.TLabel').pack()
         ttk.Label(inner_footer, text="Versión 4.0.8", font=('Segoe UI', 8, 'italic'), foreground='#999').pack()
 
         # Poner el foco en el campo de usuario
@@ -2076,7 +2098,7 @@ class ClienteWindow:
         left_frame.rowconfigure(0, weight=1)
 
         try:
-            logo_path = os.path.join(IMG_PATH, "LogoSP1.png")
+            logo_path = os.path.join(IMG_PATH, "LogoSP2.png")
             if os.path.exists(logo_path):
                 logo = Image.open(logo_path)
                 logo = logo.resize((470, 400), Image.LANCZOS)
@@ -2127,7 +2149,7 @@ class ClienteWindow:
                 command=self.volver_login_principal,
                 style='Action.TButton').pack(side=tk.LEFT, padx=12)
 
-        ttk.Label(center_frame, text="Desarrollado por A.K.J",
+        ttk.Label(center_frame, text="Desarrollado por R.A.V",
                 font=('Segoe UI', 9), foreground='#999').pack(pady=(20, 0))
 
         ttk.Label(center_frame, text="Versión 4.0.8",
@@ -4620,10 +4642,13 @@ class SaluPagoApp:
         SoundManager.reproducir(clave, volumen=vol)
 
     def crear_copia_seguridad(self):
-        """Crea una copia de seguridad en ZIP de toda la base de datos y archivos importantes (con autenticación)."""
         if not self.validar_password():
             return
-        self._crear_backup_completo(mostrar_mensaje=True, tipo="manual", usuario=self.username)
+        import threading
+        threading.Thread(
+            target=lambda: self._crear_backup_completo(mostrar_mensaje=True, tipo="manual", usuario=self.username),
+            daemon=True
+        ).start()
 
     def crear_copia_seguridad_automatica(self):
         """
@@ -4651,15 +4676,13 @@ class SaluPagoApp:
 
     def _crear_backup_completo(self, mostrar_mensaje=False, tipo="manual", usuario="MyAdmin"):
         """
-        Realiza el backup completo (ZIP) y registra en el historial.
-        tipo: 'manual' o 'automatico'
-        usuario: nombre del usuario que lo ejecuta
+        Realiza el backup completo (ZIP), lo registra y (opcionalmente) lo sube a Drive.
         """
         try:
             import tempfile, shutil, zipfile
             from datetime import datetime
 
-            # Crear una copia temporal de la base de datos
+            # Crear copia temporal de la base de datos
             temp_db = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
             temp_db.close()
             conn = sqlite3.connect(self.db.db_path)
@@ -4668,11 +4691,9 @@ class SaluPagoApp:
             backup_conn.close()
             conn.close()
 
-            # --- Crear carpeta "Backup" en la raíz del proyecto ---
             backup_dir = os.path.join(BASE_PATH, "Backup")
             os.makedirs(backup_dir, exist_ok=True)
 
-            # Nombre del ZIP con fecha/hora
             ahora = datetime.now()
             fecha_str = ahora.strftime("%Y-%m-%d")
             hora_str = ahora.strftime("%H:%M:%S")
@@ -4681,7 +4702,6 @@ class SaluPagoApp:
 
             with zipfile.ZipFile(ruta_zip, 'w', zipfile.ZIP_DEFLATED) as zipf:
                 zipf.write(temp_db.name, arcname="saluPago.db")
-                # Agregar carpetas importantes
                 carpetas = [".BT", "facturas", "Documentos", "BaseRetiros", "Caja", "Incapacidades"]
                 for carpeta in carpetas:
                     ruta_carpeta = os.path.join(BASE_PATH, carpeta)
@@ -4694,48 +4714,59 @@ class SaluPagoApp:
 
             os.unlink(temp_db.name)
 
-            # Calcular tamaño en MB
             tamaño_bytes = os.path.getsize(ruta_zip)
             tamaño_mb = round(tamaño_bytes / (1024 * 1024), 2)
 
-            # Registrar en la base de datos
+            # Registrar en BD local
             self.db.add_backup(
-                fecha=fecha_str,
-                hora=hora_str,
-                tipo=tipo,
-                usuario=usuario,
-                tamaño=tamaño_mb,
-                estado="Exitoso",
-                ubicacion=ruta_zip
+                fecha=fecha_str, hora=hora_str, tipo=tipo,
+                usuario=usuario, tamaño=tamaño_mb,
+                estado="Exitoso", ubicacion=ruta_zip
             )
-
-            # Actualizar timestamp en configuración
             self.config.set_ultimo_backup(ahora.isoformat())
-
             self._limpiar_backups_antiguos()
+
+            # ========== NUEVO: SUBIR A GOOGLE DRIVE ==========
+            if self.config.get_drive_activo():
+                subir = (
+                    (tipo == "automatico" and self.config.get_drive_subir_auto()) or
+                    (tipo == "manual" and self.config.get_drive_subir_manual())
+                )
+                if subir:
+                    try:
+                        from drive_manager import GoogleDriveManager
+                        drive = GoogleDriveManager(folder_name=self.config.get_drive_carpeta())
+                        file_id = drive.subir_archivo(ruta_zip, nombre_remoto=nombre_zip)
+                        if file_id:
+                            print(f"✅ Backup subido a Google Drive: {nombre_zip}")
+                            # Opcional: guardar el file_id en la tabla backups
+                            self.db.add_backup_drive_info(nombre_zip, file_id)
+                        else:
+                            print(f"⚠️ No se pudo subir {nombre_zip} a Drive")
+                    except FileNotFoundError as e:
+                        print(f"⚠️ Google Drive no configurado: {e}")
+                    except Exception as e:
+                        print(f"⚠️ Error subiendo a Drive: {e}")
+            # =================================================
 
             if mostrar_mensaje:
                 messagebox.showinfo("Backup automático", f"Backup completado en:\n{ruta_zip}")
             return True
 
         except Exception as e:
-            # Registrar fallo en la base de datos si es posible
             try:
                 self.db.add_backup(
                     fecha=datetime.now().strftime("%Y-%m-%d"),
                     hora=datetime.now().strftime("%H:%M:%S"),
-                    tipo=tipo,
-                    usuario=usuario,
-                    tamaño=0,
-                    estado="Fallido",
-                    ubicacion=str(e)
+                    tipo=tipo, usuario=usuario, tamaño=0,
+                    estado="Fallido", ubicacion=str(e)
                 )
             except:
                 pass
             if mostrar_mensaje:
                 messagebox.showerror("Error", f"Error en backup: {str(e)}")
             return False
-        
+            
     def programar_backup_automatico(self):
         """Inicia el ciclo de backup automático (si está activado)."""
         if self.config.get_backup_activo():
@@ -6330,7 +6361,7 @@ class SaluPagoApp:
                 f"Adjunto encontrarás el reporte detallado en formato Excel.\n\n"
                 f"Quedo atento a cualquier observación o requerimiento adicional.\n\n"
                 f"Saludos cordiales,\n\n"
-                f"A.K.J \n"
+                f"R.A.V \n"
                 f"Coordinador de Operaciones\n"
                 f"3022386236\n"
                 f"Sistema SaluPago"
@@ -6964,57 +6995,78 @@ class SaluPagoApp:
                 self.update_egresos_table(hoy)
 
         contabilidad_notebook.bind("<<NotebookTabChanged>>", on_tab_selected)
-            
+
+    def _autenticar_drive(self):
+        try:
+            from drive_manager import GoogleDriveManager
+            drive = GoogleDriveManager(folder_name=self.drive_carpeta_var.get() or "SaluPago_Backups")
+            drive._autenticar()
+            messagebox.showinfo("Google Drive",
+                                "Autenticación exitosa. Se abrirá el navegador la primera vez.")
+        except FileNotFoundError:
+            messagebox.showerror(
+                "credentials.json faltante",
+                "No se encontró credentials.json.\n\n"
+                "Descárgalo de Google Cloud Console y colócalo junto al script principal."
+            )
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo autenticar:\n{str(e)}")
+
     def setup_configuracion_interface(self, parent):
-        """Interfaz de configuración rediseñada:
-        - Fila 1 (3 columnas): Empresa | Monitoreo | Pago/Caja/Sonidos
-        - Fila 2 (2 columnas): Precios | Autoguardado
-        - Fila 3: Botones centrados
-        """
-        main_frame = ttk.Frame(parent, padding=10)
+        """Interfaz de configuración en grid 3x2 con distribución proporcional mejorada"""
+        from datetime import datetime
+
+        main_frame = ttk.Frame(parent, padding=15)
         main_frame.pack(fill=tk.BOTH, expand=True)
 
         ttk.Label(main_frame, text="⚙️ Configuración del Sistema",
                 style='Title.TLabel').pack(pady=(0, 10))
 
         # ============================================================
-        # FILA 1: 3 columnas (Empresa | Monitoreo | Pago+Sonidos)
+        # GRID 3x2 (Con proporciones ajustadas)
         # ============================================================
-        top_container = ttk.Frame(main_frame)
-        top_container.pack(fill=tk.X, pady=(0, 6))
-        top_container.columnconfigure(0, weight=1, uniform="col1")
-        top_container.columnconfigure(1, weight=1, uniform="col1")
-        top_container.columnconfigure(2, weight=1, uniform="col1")
+        grid_container = ttk.Frame(main_frame)
+        grid_container.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
 
-        # ---------- COLUMNA 1: Empresa e Imagen de Pago ----------
-        empresa_frame = ttk.LabelFrame(top_container, text="🏢 Empresa e Imagen de Pago",
+        # Columna 0: Empresa/Precios (Ancho base)
+        # Columna 1: Monitoreo/Backup (Un poco más ancha)
+        # Columna 2: Caja/Sonidos (La más ancha por los textos)
+        grid_container.columnconfigure(0, weight=10, uniform="cfgcol")
+        grid_container.columnconfigure(1, weight=11, uniform="cfgcol")
+        grid_container.columnconfigure(2, weight=12, uniform="cfgcol")
+        
+        grid_container.rowconfigure(0, weight=1)
+        grid_container.rowconfigure(1, weight=1)
+
+        # ---------- (0,0) EMPRESA ----------
+        empresa_frame = ttk.LabelFrame(grid_container,
+                                        text="🏢 Empresa e Imagen de Pago",
                                         padding=10, relief='groove')
-        empresa_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 4), pady=2)
+        empresa_frame.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
 
-        self.config_emp_nombre = tk.StringVar(value=self.config.get('empresa.nombre', ''))
-        self.config_emp_nit = tk.StringVar(value=self.config.get('empresa.nit', ''))
+        self.config_emp_nombre    = tk.StringVar(value=self.config.get('empresa.nombre', ''))
+        self.config_emp_nit       = tk.StringVar(value=self.config.get('empresa.nit', ''))
         self.config_emp_direccion = tk.StringVar(value=self.config.get('empresa.direccion', ''))
-        self.config_emp_telefono = tk.StringVar(value=self.config.get('empresa.telefono', ''))
-        self.config_emp_correo = tk.StringVar(value=self.config.get('empresa.correo', ''))
+        self.config_emp_telefono  = tk.StringVar(value=self.config.get('empresa.telefono', ''))
+        self.config_emp_correo    = tk.StringVar(value=self.config.get('empresa.correo', ''))
 
         campos_emp = [
-            ("Nombre:", self.config_emp_nombre),
-            ("NIT:", self.config_emp_nit),
+            ("Nombre:",    self.config_emp_nombre),
+            ("NIT:",       self.config_emp_nit),
             ("Dirección:", self.config_emp_direccion),
-            ("Teléfono:", self.config_emp_telefono),
-            ("Correo:", self.config_emp_correo),
+            ("Teléfono:",  self.config_emp_telefono),
+            ("Correo:",    self.config_emp_correo),
         ]
         for i, (label, var) in enumerate(campos_emp):
             ttk.Label(empresa_frame, text=label, font=('Arial', 9)).grid(
-                row=i, column=0, sticky=tk.W, padx=2, pady=3)
+                row=i, column=0, sticky=tk.W, padx=2, pady=4)
             ttk.Entry(empresa_frame, textvariable=var, font=('Arial', 9)).grid(
-                row=i, column=1, sticky=tk.EW, padx=2, pady=3)
+                row=i, column=1, sticky=tk.EW, padx=2, pady=4)
         empresa_frame.columnconfigure(1, weight=1)
 
-        # Imagen de pago
         ttk.Separator(empresa_frame, orient='horizontal').grid(
             row=len(campos_emp), column=0, columnspan=2, sticky=tk.EW, pady=6)
-        ttk.Label(empresa_frame, text="Imagen de pago (para factura):",
+        ttk.Label(empresa_frame, text="Imagen de pago (factura):",
                 font=('Arial', 9, 'bold')).grid(
             row=len(campos_emp)+1, column=0, columnspan=2, sticky=tk.W, padx=2, pady=(2, 3))
 
@@ -7026,16 +7078,17 @@ class SaluPagoApp:
                 command=self.seleccionar_imagen_pago).grid(
             row=len(campos_emp)+2, column=1, padx=(4, 2), pady=1, sticky=tk.W)
 
-        # ---------- COLUMNA 2: Monitoreo (Umbrales) ----------
-        monitoreo_frame = ttk.LabelFrame(top_container, text="📊 Umbrales de Monitoreo",
+        # ---------- (0,1) MONITOREO ----------
+        monitoreo_frame = ttk.LabelFrame(grid_container,
+                                        text="📊 Umbrales de Monitoreo",
                                         padding=10, relief='groove')
-        monitoreo_frame.grid(row=0, column=1, sticky="nsew", padx=4, pady=2)
+        monitoreo_frame.grid(row=0, column=1, sticky="nsew", padx=4, pady=4)
 
-        self.config_activo_dias = tk.StringVar(value=str(self.config.get('monitoreo_umbrales.activo_hasta_dias', 3)))
-        self.config_proximo_dias = tk.StringVar(value=str(self.config.get('monitoreo_umbrales.proximo_suspender_dias', 5)))
+        self.config_activo_dias     = tk.StringVar(value=str(self.config.get('monitoreo_umbrales.activo_hasta_dias', 3)))
+        self.config_proximo_dias    = tk.StringVar(value=str(self.config.get('monitoreo_umbrales.proximo_suspender_dias', 5)))
         self.config_suspendido_dias = tk.StringVar(value=str(self.config.get('monitoreo_umbrales.suspendido_dias', 7)))
 
-        ttk.Label(monitoreo_frame, text="Define los días para cada estado:",
+        ttk.Label(monitoreo_frame, text="Días para cada estado:",
                 font=('Arial', 9, 'italic'), foreground='#555').grid(
             row=0, column=0, columnspan=2, sticky=tk.W, padx=2, pady=(0, 8))
 
@@ -7060,26 +7113,25 @@ class SaluPagoApp:
             row=4, column=0, columnspan=2, sticky=tk.W, padx=2, pady=(10, 0))
         monitoreo_frame.columnconfigure(1, weight=1)
 
-        # ---------- COLUMNA 3: Caja, Métodos de Pago y Sonidos ----------
-        pago_frame = ttk.LabelFrame(top_container, text="💳 Caja, Pago y Sonidos",
+        # ---------- (0,2) CAJA / PAGO / SONIDOS ----------
+        pago_frame = ttk.LabelFrame(grid_container,
+                                    text="💳 Caja, Pago y Sonidos",
                                     padding=10, relief='groove')
-        pago_frame.grid(row=0, column=2, sticky="nsew", padx=(4, 0), pady=2)
+        pago_frame.grid(row=0, column=2, sticky="nsew", padx=4, pady=4)
 
-        # Base de caja
         self.config_base_caja = tk.StringVar(value=str(self.config.get_base_caja()))
-        ttk.Label(pago_frame, text="Monto base de caja:", font=('Arial', 9, 'bold')).grid(
+        ttk.Label(pago_frame, text="Monto base de caja:",
+                font=('Arial', 9, 'bold')).grid(
             row=0, column=0, sticky=tk.W, padx=2, pady=(0, 4))
         ttk.Entry(pago_frame, textvariable=self.config_base_caja, width=15,
-                font=('Arial', 9)).grid(row=0, column=1, sticky=tk.W, padx=6, pady=(0, 4))
+                font=('Arial', 9)).grid(row=0, column=1, sticky=tk.EW, padx=6, pady=(0, 4))
 
-        # Separador
         ttk.Separator(pago_frame, orient='horizontal').grid(
             row=1, column=0, columnspan=2, sticky=tk.EW, pady=6)
 
-        # Métodos de pago
         ttk.Label(pago_frame, text="Métodos de pago (separados por comas):",
                 font=('Arial', 9, 'bold')).grid(
-            row=2, column=0, columnspan=2, sticky=tk.W, padx=2, pady=(2, 1))
+            row=2, column=0, columnspan=2, sticky=tk.W, padx=2, pady=(2, 2))
         self.config_metodos_opts_var = tk.StringVar(
             value=",".join(self.config.get_opciones('metodos_pago')))
         ttk.Entry(pago_frame, textvariable=self.config_metodos_opts_var,
@@ -7089,11 +7141,9 @@ class SaluPagoApp:
                 font=('Arial', 8), foreground='#666').grid(
             row=4, column=0, columnspan=2, sticky=tk.W, padx=2, pady=(0, 6))
 
-        # Separador
         ttk.Separator(pago_frame, orient='horizontal').grid(
             row=5, column=0, columnspan=2, sticky=tk.EW, pady=6)
 
-        # Sonidos
         ttk.Label(pago_frame, text="🔊 Sonidos de retroalimentación",
                 font=('Arial', 9, 'bold')).grid(
             row=6, column=0, columnspan=2, sticky=tk.W, padx=2, pady=(0, 4))
@@ -7101,13 +7151,13 @@ class SaluPagoApp:
         self.config_sonidos_activo_var = tk.BooleanVar(value=self.config.get_sonidos_activo())
         ttk.Checkbutton(pago_frame, text="Activar sonidos",
                         variable=self.config_sonidos_activo_var).grid(
-            row=7, column=0, columnspan=2, sticky=tk.W, padx=2, pady=2)
+            row=7, column=0, columnspan=2, sticky=tk.W, padx=2, pady=3)
 
         ttk.Label(pago_frame, text="Volumen (0.0 - 1.0):",
-                font=('Arial', 9)).grid(row=8, column=0, sticky=tk.W, padx=2, pady=2)
+                font=('Arial', 9)).grid(row=8, column=0, sticky=tk.W, padx=2, pady=3)
         self.config_sonidos_volumen_var = tk.StringVar(value=str(self.config.get_sonidos_volumen()))
         ttk.Entry(pago_frame, textvariable=self.config_sonidos_volumen_var,
-                width=8, font=('Arial', 9)).grid(row=8, column=1, sticky=tk.W, padx=6, pady=2)
+                width=8, font=('Arial', 9)).grid(row=8, column=1, sticky=tk.W, padx=6, pady=3)
 
         def probar_sonido():
             SoundManager.reproducir("confirmar", volumen=self.config.get_sonidos_volumen())
@@ -7117,74 +7167,70 @@ class SaluPagoApp:
             row=9, column=0, columnspan=2, sticky=tk.EW, padx=2, pady=(6, 2))
         pago_frame.columnconfigure(1, weight=1)
 
-        # ============================================================
-        # FILA 2: 2 columnas (Precios | Autoguardado)
-        # ============================================================
-        bottom_container = ttk.Frame(main_frame)
-        bottom_container.pack(fill=tk.BOTH, expand=True, pady=(6, 0))
-        bottom_container.columnconfigure(0, weight=2)  # Precios más ancho
-        bottom_container.columnconfigure(1, weight=1)  # Backup más angosto
-
-        # ---------- Precios ----------
-        price_frame = ttk.LabelFrame(bottom_container, text="💰 Precios",
+        # ---------- (1,0) PRECIOS ----------
+        price_frame = ttk.LabelFrame(grid_container, text="💰 Precios",
                                     padding=10, relief='groove')
-        price_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 4), pady=2)
+        price_frame.grid(row=1, column=0, sticky="nsew", padx=4, pady=4)
 
-        # Variables
-        self.config_eps_var = tk.StringVar(value=str(self.config.get_precio_eps()))
-        self.config_arl_vars = {}
+        self.config_eps_var     = tk.StringVar(value=str(self.config.get_precio_eps()))
+        self.config_arl_vars    = {}
         arl_precios = self.config.get('precios.arl', {})
         for arl_name, valor in arl_precios.items():
             self.config_arl_vars[arl_name] = tk.StringVar(value=str(valor))
         self.config_pension_var = tk.StringVar(value=str(self.config.get_precio_pension()))
-        self.config_caja_var = tk.StringVar(value=str(self.config.get_precio_caja()))
+        self.config_caja_var    = tk.StringVar(value=str(self.config.get_precio_caja()))
 
         price_grid = ttk.Frame(price_frame)
         price_grid.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
 
-        # Fila 1: EPS + Pensión + Caja (3 columnas)
+        # Fila 0: EPS + Pensión + Caja (3 columnas compactas)
         ttk.Label(price_grid, text="EPS:", font=('Arial', 9, 'bold')).grid(
-            row=0, column=0, sticky=tk.W, padx=4, pady=4)
+            row=0, column=0, sticky=tk.W, padx=(0, 2), pady=3)
         ttk.Entry(price_grid, textvariable=self.config_eps_var,
-                font=('Arial', 9), width=14).grid(
-            row=0, column=1, sticky=tk.W, padx=4, pady=4)
+                font=('Arial', 9), width=7).grid(
+            row=0, column=1, sticky=tk.W, padx=(0, 10), pady=3)
 
         ttk.Label(price_grid, text="Pensión:", font=('Arial', 9, 'bold')).grid(
-            row=0, column=2, sticky=tk.W, padx=(15, 4), pady=4)
+            row=0, column=2, sticky=tk.W, padx=(0, 2), pady=3)
         ttk.Entry(price_grid, textvariable=self.config_pension_var,
-                font=('Arial', 9), width=14).grid(
-            row=0, column=3, sticky=tk.W, padx=4, pady=4)
+                font=('Arial', 9), width=7).grid(
+            row=0, column=3, sticky=tk.W, padx=(0, 10), pady=3)
 
-        ttk.Label(price_grid, text="Caja Comp.:", font=('Arial', 9, 'bold')).grid(
-            row=0, column=4, sticky=tk.W, padx=(15, 4), pady=4)
+        ttk.Label(price_grid, text="Caja:", font=('Arial', 9, 'bold')).grid(
+            row=0, column=4, sticky=tk.W, padx=(0, 2), pady=3)
         ttk.Entry(price_grid, textvariable=self.config_caja_var,
-                font=('Arial', 9), width=14).grid(
-            row=0, column=5, sticky=tk.W, padx=4, pady=4)
+                font=('Arial', 9), width=7).grid(
+            row=0, column=5, sticky=tk.W, padx=0, pady=3)
 
-        # Fila 2: ARL (los 5 niveles en una sola fila)
+        # Fila 1: ARL (5 niveles en 2 sub-filas)
         ttk.Label(price_grid, text="ARL:", font=('Arial', 9, 'bold')).grid(
-            row=1, column=0, sticky=tk.W, padx=4, pady=(10, 4))
+            row=1, column=0, sticky=tk.NW, padx=2, pady=(10, 3))
 
         arl_container = ttk.Frame(price_grid)
-        arl_container.grid(row=1, column=1, columnspan=5, sticky=tk.W, padx=4, pady=(10, 4))
-        for idx, (arl_name, var) in enumerate(self.config_arl_vars.items()):
-            ttk.Label(arl_container, text=f"{arl_name}:",
-                    font=('Arial', 9)).grid(row=0, column=idx*2, padx=(0, 2), pady=2)
-            ttk.Entry(arl_container, textvariable=var, width=9,
-                    font=('Arial', 9)).grid(row=0, column=idx*2+1, padx=(0, 12), pady=2)
+        arl_container.grid(row=1, column=1, columnspan=5, sticky=tk.W, padx=2, pady=(10, 3))
 
-        # ---------- Autoguardado ----------
-        autoguardado_frame = ttk.LabelFrame(bottom_container,
+        for idx, (arl_name, var) in enumerate(self.config_arl_vars.items()):
+            sub_row = idx // 3      # 3 por fila
+            sub_col = (idx % 3) * 2
+            ttk.Label(arl_container, text=f"{arl_name}:",
+                    font=('Arial', 9)).grid(row=sub_row, column=sub_col,
+                                            padx=(0, 2), pady=3, sticky=tk.W)
+            ttk.Entry(arl_container, textvariable=var, width=7,
+                    font=('Arial', 9)).grid(row=sub_row, column=sub_col+1,
+                                            padx=(0, 8), pady=3, sticky=tk.W)
+
+        # ---------- (1,1) AUTOGUARDADO ----------
+        autoguardado_frame = ttk.LabelFrame(grid_container,
                                             text="🔄 Autoguardado (Backup)",
                                             padding=10, relief='groove')
-        autoguardado_frame.grid(row=0, column=1, sticky="nsew", padx=(4, 0), pady=2)
+        autoguardado_frame.grid(row=1, column=1, sticky="nsew", padx=4, pady=4)
 
-        self.backup_activo_var = tk.BooleanVar(value=self.config.get_backup_activo())
-        self.backup_intervalo_var = tk.StringVar(value=str(self.config.get_backup_intervalo()))
-        self.config_dias_conservar = tk.StringVar(value=str(self.config.get_dias_conservar_backup()))
+        self.backup_activo_var      = tk.BooleanVar(value=self.config.get_backup_activo())
+        self.backup_intervalo_var   = tk.StringVar(value=str(self.config.get_backup_intervalo()))
+        self.config_dias_conservar  = tk.StringVar(value=str(self.config.get_dias_conservar_backup()))
 
         ttk.Checkbutton(autoguardado_frame, text="Activar backup automático",
-                        variable=self.backup_activo_var).pack(anchor=tk.W, padx=2, pady=(0, 6))
+                        variable=self.backup_activo_var).pack(anchor=tk.W, padx=2, pady=(0, 5))
 
         fila_int = ttk.Frame(autoguardado_frame)
         fila_int.pack(fill=tk.X, padx=2, pady=3)
@@ -7198,21 +7244,43 @@ class SaluPagoApp:
         self.entry_dias = ttk.Entry(fila_dias, textvariable=self.config_dias_conservar, width=10)
         self.entry_dias.pack(side=tk.LEFT, padx=6)
 
+        # Google Drive
+        drive_frame = ttk.LabelFrame(autoguardado_frame, text="☁️ Google Drive", padding=8)
+        drive_frame.pack(fill=tk.X, padx=2, pady=(8, 2))
+
+        self.drive_activo_var        = tk.BooleanVar(value=self.config.get_drive_activo())
+        self.drive_subir_auto_var    = tk.BooleanVar(value=self.config.get_drive_subir_auto())
+        self.drive_subir_manual_var  = tk.BooleanVar(value=self.config.get_drive_subir_manual())
+        self.drive_carpeta_var       = tk.StringVar(value=self.config.get_drive_carpeta())
+
+        ttk.Checkbutton(drive_frame, text="Activar subida a Google Drive",
+                        variable=self.drive_activo_var).pack(anchor=tk.W, pady=2)
+        ttk.Checkbutton(drive_frame, text="Subir backups automáticos",
+                        variable=self.drive_subir_auto_var).pack(anchor=tk.W, pady=2)
+        ttk.Checkbutton(drive_frame, text="Subir backups manuales",
+                        variable=self.drive_subir_manual_var).pack(anchor=tk.W, pady=2)
+
+        fila_carpeta = ttk.Frame(drive_frame)
+        fila_carpeta.pack(fill=tk.X, pady=(6, 2))
+        ttk.Label(fila_carpeta, text="Carpeta en Drive:").pack(side=tk.LEFT)
+        ttk.Entry(fila_carpeta, textvariable=self.drive_carpeta_var, width=18).pack(side=tk.LEFT, padx=5)
+
+        ttk.Button(drive_frame, text="🔗 Autenticar con Google",
+                command=self._autenticar_drive).pack(fill=tk.X, pady=(6, 2))
+
         # Último backup
         ultimo = self.config.get_ultimo_backup()
         if ultimo:
             try:
-                from datetime import datetime
                 dt = datetime.fromisoformat(ultimo)
                 ttk.Separator(autoguardado_frame, orient='horizontal').pack(fill=tk.X, pady=8)
                 ttk.Label(autoguardado_frame,
                         text=f"Último backup:\n{dt.strftime('%d/%m/%Y %H:%M')}",
                         font=('Arial', 9), foreground='#555',
                         justify=tk.LEFT).pack(anchor=tk.W, padx=2)
-            except:
+            except Exception:
                 pass
 
-        # Habilitar / deshabilitar campos según checkbox
         def toggle_backup_fields():
             estado = 'normal' if self.backup_activo_var.get() else 'disabled'
             self.entry_intervalo.config(state=estado)
@@ -7221,11 +7289,40 @@ class SaluPagoApp:
         self.backup_activo_var.trace('w', lambda *args: toggle_backup_fields())
         toggle_backup_fields()
 
+        # ---------- (1,2) INFORMACIÓN ----------
+        info_frame = ttk.LabelFrame(grid_container, text="ℹ️ Información",
+                                    padding=10, relief='groove')
+        info_frame.grid(row=1, column=2, sticky="nsew", padx=4, pady=4)
+
+        try:
+            empresa_nombre = self.config.get('empresa.nombre', 'SaluPago')
+            ultimo_bk = self.config.get_ultimo_backup() or "Nunca"
+            try:
+                if ultimo_bk != "Nunca":
+                    ultimo_bk = datetime.fromisoformat(ultimo_bk).strftime('%d/%m/%Y %H:%M')
+            except Exception:
+                pass
+
+            info_texto = (
+                f"Empresa: {empresa_nombre}\n\n"
+                f"Base de datos:\n{os.path.basename(self.config.db_path)}\n\n"
+                f"Último backup:\n{ultimo_bk}\n\n"
+                f"Versión: 4.0.8\n"
+                f"Sistema SaluPago\n\n"
+                f"💡 Tip: los cambios se guardan\nal presionar 'Guardar Cambios'."
+            )
+        except Exception:
+            info_texto = "SaluPago\nVersión 4.0.8"
+
+        ttk.Label(info_frame, text=info_texto,
+                font=('Arial', 9), foreground='#555',
+                justify=tk.LEFT).pack(anchor=tk.NW, padx=2, pady=2)
+
         # ============================================================
-        # FILA 3: Botones de acción centrados
+        # FILA 2: Botones de acción centrados
         # ============================================================
         btn_frame = ttk.Frame(main_frame)
-        btn_frame.pack(fill=tk.X, pady=(12, 0))
+        btn_frame.pack(fill=tk.X, pady=(10, 0))
 
         style = ttk.Style()
         style.configure("Config.TButton", padding=8, font=('Arial', 10, 'bold'))
@@ -7253,11 +7350,11 @@ class SaluPagoApp:
                 self.config.update({'opciones': {'metodos_pago': metodos}})
 
                 empresa_data = {
-                    'nombre': self.config_emp_nombre.get().strip(),
-                    'nit': self.config_emp_nit.get().strip(),
+                    'nombre':    self.config_emp_nombre.get().strip(),
+                    'nit':       self.config_emp_nit.get().strip(),
                     'direccion': self.config_emp_direccion.get().strip(),
-                    'telefono': self.config_emp_telefono.get().strip(),
-                    'correo': self.config_emp_correo.get().strip()
+                    'telefono':  self.config_emp_telefono.get().strip(),
+                    'correo':    self.config_emp_correo.get().strip()
                 }
                 self.config.update({'empresa': empresa_data})
 
@@ -7302,6 +7399,15 @@ class SaluPagoApp:
                     messagebox.showerror("Error", "El volumen debe ser un número entre 0.0 y 1.0")
                     return
                 SoundManager.set_habilitado(self.config_sonidos_activo_var.get())
+
+                # Google Drive
+                try:
+                    self.config.set('google_drive.activo', self.drive_activo_var.get())
+                    self.config.set('google_drive.subir_backup_automatico', self.drive_subir_auto_var.get())
+                    self.config.set('google_drive.subir_backup_manual', self.drive_subir_manual_var.get())
+                    self.config.set('google_drive.carpeta', self.drive_carpeta_var.get().strip())
+                except Exception:
+                    pass
 
                 messagebox.showinfo("Éxito", "Configuración guardada correctamente.")
             except ValueError as e:
@@ -7355,7 +7461,7 @@ class SaluPagoApp:
         ttk.Button(btn_container, text="✖️ Cerrar",
                 command=lambda: parent.winfo_toplevel().destroy(),
                 style="Config.TButton").pack(side=tk.LEFT, padx=10)
-                    
+                            
     def seleccionar_imagen_pago(self):
         """Abre un diálogo para seleccionar una imagen de pago y actualiza la variable."""
         from tkinter import filedialog
@@ -7374,34 +7480,56 @@ class SaluPagoApp:
         ventana = Toplevel(self.root)
         ventana.title("Configuración del Sistema")
 
-        # ---- Dimensiones ajustadas al contenido ----
-        ancho, alto = 1200, 600
+        # ---- Ancho aumentado para ajustar secciones, altura compacta con scroll ----
+        ancho, alto = 1260, 580  
         ventana.geometry(f"{ancho}x{alto}")
-        ventana.minsize(1100, 500)          # mínimo razonable, sin forzar altura extra
+        ventana.minsize(1150, 500) 
         ventana.resizable(True, True)
         ventana.transient(self.root)
         ventana.grab_set()
 
-        # ---- Centrar en la pantalla (después de crear la ventana) ----
+        # ---- Centrar en pantalla ----
         ventana.update_idletasks()
         screen_w = ventana.winfo_screenwidth()
         screen_h = ventana.winfo_screenheight()
         x = (screen_w // 2) - (ancho // 2)
-        y = (screen_h // 2) - (alto // 2)
-        # Pequeño ajuste para no quedar por debajo de la barra de tareas
-        y = max(y, 30)
+        y = max(20, (screen_h // 2) - (alto // 2))
         ventana.geometry(f"{ancho}x{alto}+{x}+{y}")
 
-        # ---- Contenido ----
-        frame = ttk.Frame(ventana)
-        frame.pack(fill=tk.BOTH, expand=True)
-        self.setup_configuracion_interface(frame)
+        # ---- Frame con Scroll ----
+        main_container = ttk.Frame(ventana)
+        main_container.pack(fill=tk.BOTH, expand=True)
+
+        canvas = tk.Canvas(main_container, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(main_container, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        # Configurar el scroll con la rueda del ratón
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
+        # ---- Llamar a la interfaz ----
+        self.setup_configuracion_interface(scrollable_frame)
 
         def cerrar_ventana():
+            canvas.unbind_all("<MouseWheel>")
             ventana.destroy()
 
         ventana.protocol("WM_DELETE_WINDOW", cerrar_ventana)
-        
+                        
     def setup_historial_pagos_interface(self, parent):
         """Configura la interfaz del historial de pagos (agrupado por afiliado)"""
         main_frame = ttk.Frame(parent)
@@ -12651,7 +12779,7 @@ class SaluPagoApp:
         contact_frame.pack(fill=tk.X, pady=10)
         
         ttk.Label(contact_frame, text="Desarrollador:", font=('Arial', 10, 'bold')).grid(row=0, column=0, sticky=tk.W, pady=5)
-        ttk.Label(contact_frame, text="A.K.J ").grid(row=0, column=1, sticky=tk.W, pady=5)
+        ttk.Label(contact_frame, text="R.A.V ").grid(row=0, column=1, sticky=tk.W, pady=5)
         
         ttk.Label(contact_frame, text="Teléfono:", font=('Arial', 10, 'bold')).grid(row=1, column=0, sticky=tk.W, pady=5)
         ttk.Label(contact_frame, text="3022386236").grid(row=1, column=1, sticky=tk.W, pady=5)
@@ -13006,7 +13134,7 @@ class SaluPagoApp:
 
         Para asistencia con el sistema, contacte al desarrollador:
 
-        * Desarrollador:A.K.J
+        * Desarrollador:R.A.V
         * Contacto: 3022386236
         * Email: andresberri15@gmail.com
 
@@ -13035,7 +13163,7 @@ class SaluPagoApp:
 
         Nombre: SaluPago - Sistema de Pagos a EPS
         Versión: 2.0
-        Desarrollador:A.K.J
+        Desarrollador:R.A.V
         Contacto: 3022386236
         Email: andresberri15@gmail.com
         Año: 2025

@@ -1,0 +1,23 @@
+# SaluPago (escritorio) y SaluApp (portal del afiliado)
+# Si falla alguna versión, puedes quitar el número y dejar solo el nombre.
+
+# Interfaz
+tkinterdnd2
+Pillow
+flet
+
+# Documentos, datos y reportes
+reportlab
+pandas
+openpyxl
+PyMuPDF
+python-dateutil
+
+# QR y cámara
+qrcode
+opencv-python
+numpy
+pyzbar
+
+# Sonidos
+pygame

@@ -1,0 +1,29 @@
+# Entorno virtual y caché de Python
+venv/
+.venv/
+__pycache__/
+*.pyc
+
+# Datos privados generados por la aplicación (NO subir a GitHub)
+.BT/
+facturas/
+Documentos/
+Incapacidades/
+BaseRetiros/
+Caja/
+Recibos/
+Reportes/
+Backup/
+backups/
+Panico/
+users.json
+client_config.json
+*.db
+*.sqlite
+backup_automatico_*.zip
+
+# Sistema y editores
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
